@@ -1,50 +1,9 @@
 use alloc::vec::Vec;
 use psp::Align16;
-use psp::math::{acosf, sinf};
+use crate::vertex::Vertex;
+use crate::utils::slerp;
+use crate::sv;
 
-#[repr(C, align(4))]
-#[derive(Copy, Clone)]
-pub struct Vertex {
-    pub nx: f32, pub ny: f32, pub nz: f32,
-    pub x: f32, pub y: f32, pub z: f32,
-}
-
-// On a unit sphere the outward normal equals the position.
-macro_rules! sv {
-    ($x:expr, $y:expr, $z:expr) => {
-        Vertex { nx: $x, ny: $y, nz: $z, x: $x, y: $y, z: $z }
-    };
-}
-
-impl Vertex {
-    fn dot_prod(&self, other: &Vertex) -> f32 {
-        self.x * other.x + self.y * other.y + self.z * other.z
-    }
-
-    fn scalar_prod(&self, m: f32) -> Vertex {
-        sv!(self.x * m, self.y * m, self.z *m)
-    }
-
-    fn vector_add(&self, other: &Vertex) -> Vertex {
-        sv!(self.x + other.x, self.y + other.y, self.z + other.z)
-    }
-}
-
-fn slerp(v1: Vertex, v2: Vertex, t: f32) -> Vertex {
-    if t < 0. || t > 1. {
-        return v1;
-    }
-
-    let omega = acosf(v1.dot_prod(&v2));
-    if omega < 1e-4 {
-        return v1
-    }
-
-    unsafe {
-        v1.scalar_prod(sinf((1.0-t)*omega) / sinf(omega))
-            .vector_add(&v2.scalar_prod(sinf(t*omega) / sinf(omega)))
-    }
-}
 
 pub fn icosphere(frag_steps: usize) -> Vec<Vertex> {
     let v_cap = 60 * 4_usize.pow(frag_steps as u32);

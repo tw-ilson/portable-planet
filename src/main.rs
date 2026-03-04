@@ -2,8 +2,14 @@
 #![no_main]
 extern crate alloc;
 
+mod vertex;
 mod icosphere;
-use icosphere::{icosphere, Vertex};
+mod perlin;
+mod utils;
+mod terrain;
+mod prng;
+use terrain::Terrain;
+use vertex::Vertex;
 
 use core::ptr;
 use psp::Align16;
@@ -51,7 +57,7 @@ unsafe fn init() -> Result<(), PSPError> {
     sys::sceGuDepthFunc(DepthFunc::GreaterOrEqual);
     sys::sceGuEnable(GuState::DepthTest);
     sys::sceGuFrontFace(FrontFaceDirection::Clockwise);
-    sys::sceGuShadeModel(ShadingModel::Smooth);
+    sys::sceGuShadeModel(ShadingModel::Flat);
     sys::sceGuEnable(GuState::CullFace);
     sys::sceGuEnable(GuState::ClipPlanes);
 
@@ -59,8 +65,10 @@ unsafe fn init() -> Result<(), PSPError> {
     sys::sceGuEnable(GuState::Lighting);
     sys::sceGuEnable(GuState::Light0);
     let dir = ScePspFVector3 { x: 0.577, y: 0.577, z: 0.577 };
-    sys::sceGuLight(0, LightType::Directional, LightComponent::DIFFUSE, &dir);
+    sys::sceGuLight(0, LightType::Directional, LightComponent::DIFFUSE | LightComponent::SPECULAR, &dir);
     sys::sceGuLightColor(0, LightComponent::DIFFUSE, 0xffffffff);
+    sys::sceGuLightColor(0, LightComponent::SPECULAR, 0xffffffff);
+    sys::sceGuSpecular(100.0);
     sys::sceGuAmbient(0xff202020);
 
     sys::sceGuFinish();
@@ -73,7 +81,9 @@ unsafe fn main_loop() {
 
     sys::sceGuDisplay(true);
 
-    let verts = icosphere(3);
+    let mut rng = prng::Prng::new();
+    let terrain = Terrain::new(3.0, 0.4, &mut rng);
+    let verts = terrain.shape;
     unsafe {
         sys::sceKernelDcacheWritebackRange(
             verts.as_ptr() as *const _,
@@ -108,11 +118,11 @@ unsafe fn main_loop() {
         sys::sceGumRotateZ(val);
         sys::sceGumRotateX(POLE_ALIGN);
 
-        sys::sceGuMaterial(LightComponent::DIFFUSE, 0xff0000ff);
+        sys::sceGuMaterial(LightComponent::SPECULAR, 0xffffffff);
 
         sys::sceGumDrawArray(
             GuPrimitive::Triangles,
-            VertexType::NORMAL_32BITF | VertexType::VERTEX_32BITF | VertexType::TRANSFORM_3D,
+            VertexType::COLOR_8888 | VertexType::NORMAL_32BITF | VertexType::VERTEX_32BITF | VertexType::TRANSFORM_3D,
             verts.len() as i32,
             ptr::null_mut(),
             verts.as_ptr() as *const _,
@@ -124,7 +134,7 @@ unsafe fn main_loop() {
         sys::sceDisplayWaitVblankStart();
         sys::sceGuSwapBuffers();
 
-        val += 0.02;
+        val += 0.01;
     }
 }
 
