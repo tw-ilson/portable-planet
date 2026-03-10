@@ -5,8 +5,6 @@ use crate::perlin::noise;
 use crate::icosphere::icosphere;
 use crate::prng::Prng;
 
-const POLE_A: f32 = 0.5257311;  // icosphere pole axis (0, A, B)
-const POLE_B: f32 = 0.8506508;
 const POLE_CAP: f32 = 0.95;     // dot-product threshold for polar snow
 
 const DEEP_OCEAN:    f32 = 0.96;
@@ -54,8 +52,7 @@ impl Terrain {
             v.y = v.y * disp + ny;
             v.z = v.z * disp + nz;
             // normals stay as the original unit vectors (radial direction unchanged)
-            let pole_dot = v.ny * POLE_A + v.nz * POLE_B;
-            let near_pole = pole_dot.abs() > POLE_CAP;
+            let near_pole = v.ny.abs() > POLE_CAP;
             let base = if near_pole || offset >= SNOW_PEAK {
                 0xffeeeeee_u32  // snow: polar caps + high peaks
             } else if offset < DEEP_OCEAN {

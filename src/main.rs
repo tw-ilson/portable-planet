@@ -17,6 +17,7 @@ use psp::sys::{
     self, ScePspFVector3, DisplayPixelFormat, GuContextType, GuSyncMode, GuSyncBehavior,
     GuPrimitive, FrontFaceDirection, ShadingModel, GuState, TexturePixelFormat, DepthFunc,
     VertexType, ClearBuffer, LightType, LightComponent,
+    SceCtrlData, CtrlButtons, CtrlMode,
 };
 use psp::vram_alloc::get_vram_allocator;
 use psp::{BUF_WIDTH, SCREEN_WIDTH, SCREEN_HEIGHT};
@@ -91,10 +92,34 @@ unsafe fn main_loop() {
         );
     }
 
-    let mut val = 0.0_f32;
+    sys::sceCtrlSetSamplingCycle(0);
+    sys::sceCtrlSetSamplingMode(CtrlMode::Analog);
 
+    const DPAD_STEP: f32 = 0.03;
+    const ANALOG_DEADZONE: f32 = 20.0;
+    const ANALOG_SENSITIVITY: f32 = 0.05;
+    const PITCH_LIMIT: f32 = 1.4; // ~80°
+
+    let mut yaw = 0.0_f32;
+    let mut pitch = 0.0_f32;
 
     loop {
+        // Read controller input
+        let mut pad: SceCtrlData = core::mem::zeroed();
+        sys::sceCtrlReadBufferPositive(&mut pad, 1);
+
+        if pad.buttons.contains(CtrlButtons::LEFT)  { yaw   -= DPAD_STEP; }
+        if pad.buttons.contains(CtrlButtons::RIGHT) { yaw   += DPAD_STEP; }
+        if pad.buttons.contains(CtrlButtons::UP)    { pitch -= DPAD_STEP; }
+        if pad.buttons.contains(CtrlButtons::DOWN)  { pitch += DPAD_STEP; }
+
+        let ax = pad.lx as f32 - 128.0;
+        let ay = pad.ly as f32 - 128.0;
+        if ax.abs() > ANALOG_DEADZONE { yaw   += ax / 127.0 * ANALOG_SENSITIVITY; }
+        if ay.abs() > ANALOG_DEADZONE { pitch += ay / 127.0 * ANALOG_SENSITIVITY; }
+
+        pitch = pitch.clamp(-PITCH_LIMIT, PITCH_LIMIT);
+
         sys::sceGuStart(GuContextType::Direct, &raw mut OPS_LIST.0 as *mut [u32; 0x40000] as *mut _);
 
         sys::sceGuClearColor(0xff000000);
@@ -112,11 +137,8 @@ unsafe fn main_loop() {
         sys::sceGumLoadIdentity();
         sys::sceGumTranslate(&ScePspFVector3 { x: 0.0, y: 0.0, z: -2.5 });
         sys::sceGumScale(&ScePspFVector3 { x: 1.5, y: 1.5, z: 1.5 });
-        // Rotate about the pole axis (0,A,B) via change of basis:
-        // R = Rx(-α) * Rz(val) * Rx(α), where Rx(α) maps the pole to +Z
-        sys::sceGumRotateX(-POLE_ALIGN);
-        sys::sceGumRotateZ(val);
-        sys::sceGumRotateX(POLE_ALIGN);
+        sys::sceGumRotateX(pitch);
+        sys::sceGumRotateY(yaw);
 
         sys::sceGuMaterial(LightComponent::SPECULAR, 0xffffffff);
 
@@ -133,9 +155,15 @@ unsafe fn main_loop() {
 
         sys::sceDisplayWaitVblankStart();
         sys::sceGuSwapBuffers();
-
-        val += 0.01;
     }
+}
+
+#[allow(dead_code)]
+unsafe fn apply_auto_rotation(val: f32) {
+    // Old pole-axis auto-rotation: R = Rx(-α) * Rz(val) * Rx(α)
+    sys::sceGumRotateX(-POLE_ALIGN);
+    sys::sceGumRotateZ(val);
+    sys::sceGumRotateX(POLE_ALIGN);
 }
 
 fn psp_main() {
