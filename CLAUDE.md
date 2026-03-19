@@ -127,7 +127,7 @@ Polar caps: `dot(normal, pole_axis).abs() > POLE_CAP`
 
 ```bash
 just psplink-start   # start usbhostfs_pc in background (once per session)
-just run             # reset PSPLink → cargo psp → load PSP-Test.prx
+just run             # reset PSPLink → cargo psp → load portable-planet.prx
 just psplink-stop    # kill usbhostfs_pc
 ```
 

@@ -1,4 +1,4 @@
-game := "PSP-Test"
+game := "portable-planet"
 eboot := "target/mipsel-sony-psp/debug/EBOOT.PBP"
 prx := "target/mipsel-sony-psp/debug/" + game + ".prx"
 psplink_src := "/tmp/psplinkusb_build/psplink"

@@ -8,6 +8,7 @@ mod perlin;
 mod utils;
 mod terrain;
 mod prng;
+mod stars;
 use terrain::Terrain;
 use vertex::Vertex;
 
@@ -18,6 +19,7 @@ use psp::sys::{
     GuPrimitive, FrontFaceDirection, ShadingModel, GuState, TexturePixelFormat, DepthFunc,
     VertexType, ClearBuffer, LightType, LightComponent,
     SceCtrlData, CtrlButtons, CtrlMode,
+    MipmapLevel, TextureEffect, TextureColorComponent, TextureFilter,
 };
 use psp::vram_alloc::get_vram_allocator;
 use psp::{BUF_WIDTH, SCREEN_WIDTH, SCREEN_HEIGHT};
@@ -33,17 +35,30 @@ enum PSPError {
 // Angle that aligns the pole axis (0,A,B) to +Z: cos = B, sin = A → α = arcsin(A)
 const POLE_ALIGN: f32 = 0.5535744;
 
+#[repr(C, align(4))]
+struct TexVertex {
+    u: f32, v: f32,
+    x: f32, y: f32, z: f32,
+}
+
+// Fullscreen quad in clip space: (-1,-1) to (1,1) with identity matrices fills the screen.
+// NDC y=1 is screen top, y=-1 is screen bottom, so UV v is flipped accordingly.
+static STAR_QUAD: Align16<[TexVertex; 6]> = Align16([
+    TexVertex { u: 0.0, v: 1.0, x: -1.0, y: -1.0, z: 0.0 },
+    TexVertex { u: 1.0, v: 1.0, x:  1.0, y: -1.0, z: 0.0 },
+    TexVertex { u: 1.0, v: 0.0, x:  1.0, y:  1.0, z: 0.0 },
+    TexVertex { u: 0.0, v: 1.0, x: -1.0, y: -1.0, z: 0.0 },
+    TexVertex { u: 1.0, v: 0.0, x:  1.0, y:  1.0, z: 0.0 },
+    TexVertex { u: 0.0, v: 0.0, x: -1.0, y:  1.0, z: 0.0 },
+]);
+
 unsafe fn init() -> Result<(), PSPError> {
     let allocator = get_vram_allocator().unwrap();
     let fbp0 = allocator.alloc_texture_pixels(BUF_WIDTH, SCREEN_HEIGHT, TexturePixelFormat::Psm8888);
     let fbp1 = allocator.alloc_texture_pixels(BUF_WIDTH, SCREEN_HEIGHT, TexturePixelFormat::Psm8888);
     let zbp = allocator.alloc_texture_pixels(BUF_WIDTH, SCREEN_HEIGHT, TexturePixelFormat::Psm4444);
-    // Attempting to free the three VRAM chunks at this point would give a
-    // compile-time error since fbp0, fbp1 and zbp are used later on
-    //allocator.free_all();
 
     sys::sceGumLoadIdentity();
-
     sys::sceGuInit();
 
     sys::sceGuStart(GuContextType::Direct, &raw mut OPS_LIST.0 as *mut [u32; 0x40000] as *mut _);
@@ -61,6 +76,7 @@ unsafe fn init() -> Result<(), PSPError> {
     sys::sceGuShadeModel(ShadingModel::Flat);
     sys::sceGuEnable(GuState::CullFace);
     sys::sceGuEnable(GuState::ClipPlanes);
+    sys::sceGuEnable(GuState::Texture2D);
 
     // Lighting
     sys::sceGuEnable(GuState::Lighting);
@@ -77,18 +93,86 @@ unsafe fn init() -> Result<(), PSPError> {
     Ok(())
 }
 
+unsafe fn draw_stars() {
+    sys::sceGuDisable(GuState::DepthTest);
+    sys::sceGuDisable(GuState::Lighting);
+    sys::sceGuDisable(GuState::CullFace);
+    sys::sceGumMatrixMode(sys::MatrixMode::Projection);
+    sys::sceGumLoadIdentity();
+    sys::sceGumMatrixMode(sys::MatrixMode::View);
+    sys::sceGumLoadIdentity();
+    sys::sceGumMatrixMode(sys::MatrixMode::Model);
+    sys::sceGumLoadIdentity();
+    sys::sceGuTexMode(TexturePixelFormat::Psm8888, 0, 0, 1); // swizzled
+    sys::sceGuTexImage(
+        MipmapLevel::None,
+        stars::TEX_W as i32, stars::TEX_H as i32, stars::TEX_W as i32,
+        &raw const stars::PIXELS as *const _,
+    );
+    sys::sceGuTexFunc(TextureEffect::Replace, TextureColorComponent::Rgb);
+    sys::sceGuTexFilter(TextureFilter::Nearest, TextureFilter::Nearest);
+    sys::sceGuTexScale(1.0, 1.0);
+    sys::sceGuTexOffset(0.0, 0.0);
+    sys::sceGumDrawArray(
+        GuPrimitive::Triangles,
+        VertexType::TEXTURE_32BITF | VertexType::VERTEX_32BITF | VertexType::TRANSFORM_3D,
+        6, ptr::null_mut(),
+        &STAR_QUAD as *const Align16<_> as *const _,
+    );
+    sys::sceGuEnable(GuState::DepthTest);
+    sys::sceGuEnable(GuState::Lighting);
+    sys::sceGuEnable(GuState::CullFace);
+    sys::sceGuDisable(GuState::Texture2D);
+}
+
+unsafe fn draw_planet(verts: &[Vertex], pitch: f32, yaw: f32) {
+    sys::sceGumMatrixMode(sys::MatrixMode::Projection);
+    sys::sceGumLoadIdentity();
+    sys::sceGumPerspective(75.0, 16.0 / 9.0, 0.5, 1000.0);
+
+    sys::sceGumMatrixMode(sys::MatrixMode::View);
+    sys::sceGumLoadIdentity();
+
+    sys::sceGumMatrixMode(sys::MatrixMode::Model);
+    sys::sceGumLoadIdentity();
+    sys::sceGumTranslate(&ScePspFVector3 { x: 0.0, y: 0.0, z: -2.5 });
+    sys::sceGumScale(&ScePspFVector3 { x: 1.5, y: 1.5, z: 1.5 });
+    sys::sceGumRotateX(pitch);
+    sys::sceGumRotateY(yaw);
+
+    sys::sceGuMaterial(LightComponent::SPECULAR, 0xffffffff);
+
+    sys::sceGumDrawArray(
+        GuPrimitive::Triangles,
+        VertexType::COLOR_8888 | VertexType::NORMAL_32BITF | VertexType::VERTEX_32BITF | VertexType::TRANSFORM_3D,
+        verts.len() as i32,
+        ptr::null_mut(),
+        verts.as_ptr() as *const _,
+    );
+
+    sys::sceGuEnable(GuState::Texture2D);
+}
+
 unsafe fn main_loop() {
     psp::sys::sceDisplayWaitVblankStart();
-
     sys::sceGuDisplay(true);
 
     let mut rng = prng::Prng::new();
+
     let terrain = Terrain::new(3.0, 0.4, &mut rng);
     let verts = terrain.shape;
     unsafe {
         sys::sceKernelDcacheWritebackRange(
             verts.as_ptr() as *const _,
             (verts.len() * core::mem::size_of::<Vertex>()) as u32,
+        );
+    }
+
+    unsafe {
+        stars::generate(&mut rng);
+        sys::sceKernelDcacheWritebackRange(
+            (&raw const stars::PIXELS) as *const _,
+            (stars::TEX_W * stars::TEX_H * 4) as u32,
         );
     }
 
@@ -104,7 +188,6 @@ unsafe fn main_loop() {
     let mut pitch = 0.0_f32;
 
     loop {
-        // Read controller input
         let mut pad: SceCtrlData = core::mem::zeroed();
         sys::sceCtrlReadBufferPositive(&mut pad, 1);
 
@@ -126,29 +209,8 @@ unsafe fn main_loop() {
         sys::sceGuClearDepth(0);
         sys::sceGuClear(ClearBuffer::COLOR_BUFFER_BIT | ClearBuffer::DEPTH_BUFFER_BIT);
 
-        sys::sceGumMatrixMode(sys::MatrixMode::Projection);
-        sys::sceGumLoadIdentity();
-        sys::sceGumPerspective(75.0, 16.0 / 9.0, 0.5, 1000.0);
-
-        sys::sceGumMatrixMode(sys::MatrixMode::View);
-        sys::sceGumLoadIdentity();
-
-        sys::sceGumMatrixMode(sys::MatrixMode::Model);
-        sys::sceGumLoadIdentity();
-        sys::sceGumTranslate(&ScePspFVector3 { x: 0.0, y: 0.0, z: -2.5 });
-        sys::sceGumScale(&ScePspFVector3 { x: 1.5, y: 1.5, z: 1.5 });
-        sys::sceGumRotateX(pitch);
-        sys::sceGumRotateY(yaw);
-
-        sys::sceGuMaterial(LightComponent::SPECULAR, 0xffffffff);
-
-        sys::sceGumDrawArray(
-            GuPrimitive::Triangles,
-            VertexType::COLOR_8888 | VertexType::NORMAL_32BITF | VertexType::VERTEX_32BITF | VertexType::TRANSFORM_3D,
-            verts.len() as i32,
-            ptr::null_mut(),
-            verts.as_ptr() as *const _,
-        );
+        draw_stars();
+        draw_planet(&verts, pitch, yaw);
 
         sys::sceGuFinish();
         sys::sceGuSync(GuSyncMode::Finish, GuSyncBehavior::Wait);
@@ -168,7 +230,6 @@ unsafe fn apply_auto_rotation(val: f32) {
 
 fn psp_main() {
     psp::enable_home_button();
-    // psp::dprint!("Hello PSP from rust!");
     unsafe {
         init();
         main_loop();
