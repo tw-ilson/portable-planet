@@ -1,6 +1,6 @@
 # portable-planet
 
-Procedural planet generator for PSP homebrew.
+Procedural planet generator for PSP homebrew
 
 ## Dependencies
 
@@ -18,7 +18,7 @@ Procedural planet generator for PSP homebrew.
 ## Commands
 
 ```bash
-just psplink-start   # start USB host filesystem daemon
+just psplink-start   # start USB host filesystem daemon (needed for `just run`)
 just run             # build and load .prx over USB
 just psplink-stop    # stop daemon
 just upload <path>   # copy EBOOT.PBP to PSP filesystem
